@@ -1,0 +1,113 @@
+name: KeepMacAwake
+
+schemes:
+  # Defining any scheme turns off xcodegen's auto-generated ones, so the plain
+  # test scheme has to be declared too.
+  KeepMacAwakeTests:
+    build:
+      targets:
+        KeepMacAwakeTests: [test]
+    test:
+      targets:
+        - KeepMacAwakeTests
+
+  # Same tests, but with the device gate open. Kept as a separate scheme because
+  # xcodebuild does not forward shell environment variables into a host-less
+  # macOS test bundle — the variable has to live in the scheme.
+  KeepMacAwakeDeviceTests:
+    build:
+      targets:
+        KeepMacAwakeTests: [test]
+    test:
+      targets:
+        - KeepMacAwakeTests
+      environmentVariables:
+        KMA_DEVICE_TESTS: "1"
+
+options:
+  bundleIdPrefix: ai.pakslab
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: CNRZ47Y629
+    MARKETING_VERSION: "1.1.2"
+    CURRENT_PROJECT_VERSION: "10"
+    SWIFT_VERSION: "5.9"
+    ARCHS: "arm64 x86_64"
+    ONLY_ACTIVE_ARCH: NO
+    ENABLE_HARDENED_RUNTIME: true
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  KeepMacAwake:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+        excludes: ["**/.DS_Store"]
+      - path: Core
+      - path: Shared
+      - path: Helper/ai.pakslab.keep-mac-awake.helper.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchDaemons
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Keep Mac Awake
+        CFBundleName: Keep Mac Awake
+        # xcodegen defaults these to 1.0/1 unless wired to the build settings.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleIconFile: AppIcon
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.utilities
+        NSHumanReadableCopyright: Kemal Andic
+    entitlements:
+      path: App/KeepMacAwake.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.pakslab.keep-mac-awake
+        PRODUCT_NAME: Keep Mac Awake
+    dependencies:
+      - target: KeepMacAwakeHelper
+        copy:
+          destination: executables
+
+  KeepMacAwakeHelper:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Helper
+        excludes: ["**/*.plist", "**/.DS_Store"]
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.pakslab.keep-mac-awake.helper
+        PRODUCT_NAME: ai.pakslab.keep-mac-awake.helper
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        SKIP_INSTALL: YES
+
+  KeepMacAwakeTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+      - path: Core
+      - path: Shared
+      # Helper's pure logic is compiled straight into the test bundle.
+      - path: Helper/BaselineStore.swift
+      - path: Helper/PowerSettings.swift
+      - path: Helper/HelperService.swift
+    settings:
+      base:
+        ENABLE_HARDENED_RUNTIME: false
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: ai.pakslab.keep-mac-awake.tests

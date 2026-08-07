@@ -1,0 +1,10 @@
+.DS_Store
+build/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+dist/
+
+# Local tooling
+.internal/
+.paks/
