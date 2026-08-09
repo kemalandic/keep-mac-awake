@@ -110,6 +110,22 @@ final class HelperRestoreDefaultsTests: XCTestCase {
                        "the app gave up ownership — it must not pull the settings back")
     }
 
+    /// `pmset restoredefaults` restores the per-profile settings and leaves the
+    /// system-wide lid override exactly as it was. A user who had used the
+    /// lid switch would be told their Mac was handed back while it still
+    /// refused to sleep with the lid closed — the promise half kept.
+    func testTheLidOverrideIsClearedTooEvenThoughRestoringDefaultsLeavesIt() {
+        control.restoreDefaultsLeavesDisableSleep = true
+        apply(PowerConfig(keepAwake: false, keepDisplayOn: false, stayAwakeWithLidClosed: true))
+        XCTAssertTrue(control.settings.disableSleep, "precondition: the lid override is on")
+
+        let result = restoreDefaults()
+
+        XCTAssertTrue(result.ok)
+        XCTAssertFalse(control.settings.disableSleep,
+                       "handing the settings back has to include this one")
+    }
+
     // MARK: - Failure
 
     func testKeepsTheRecordsWhenTheRestoreItselfFails() {

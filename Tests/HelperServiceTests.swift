@@ -26,10 +26,18 @@ final class FakePowerControl: PowerSettingsControlling {
         settings = newSettings
     }
 
+    /// Mirrors what `pmset restoredefaults` really does: it restores the
+    /// per-profile settings and leaves the system-wide lid override alone.
+    /// A fake that cleared everything would only reflect what we assumed.
+    var restoreDefaultsLeavesDisableSleep = false
+
     func restoreDefaults() throws {
         restoreDefaultsCalls += 1
         if let restoreDefaultsError { throw restoreDefaultsError }
-        settings = PowerSettings(sleepMinutes: 10, displaySleepMinutes: 10, disableSleep: false)
+        settings = PowerSettings(sleepMinutes: 10,
+                                 displaySleepMinutes: 10,
+                                 disableSleep: restoreDefaultsLeavesDisableSleep
+                                     ? settings.disableSleep : false)
     }
 
     func readAssertions() throws -> [SleepBlocker] { assertions }

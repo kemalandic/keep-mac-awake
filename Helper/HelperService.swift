@@ -59,6 +59,16 @@ final class HelperService: NSObject, PowerHelperProtocol {
         Log.helper.notice("restoring macOS defaults")
         do {
             try control.restoreDefaults()
+
+            // `pmset restoredefaults` restores the per-profile settings and
+            // leaves the system-wide lid override exactly as it was. Without
+            // this the user is told their Mac was handed back while it still
+            // refuses to sleep with the lid closed.
+            var settings = try control.read()
+            if settings.disableSleep {
+                settings.disableSleep = false
+                try writeVerified(settings)
+            }
         } catch {
             // The records stay. Dropping them after a failed restore would
             // strand the user with settings the app no longer admits to owning.
