@@ -156,6 +156,19 @@ Mac awake. Two things are filtered out, and the reasoning matters:
 - **`UserIsActive`** means someone touched the keyboard. Not a reason the
   machine is refusing to sleep.
 
+Two more things the raw output gets wrong for a reader, both found by looking at
+a screenshot rather than at a test:
+
+- **The holder is not always the culprit.** `runningboardd` holds assertions on
+  behalf of background tasks, so naming it tells the user nothing while the app
+  they recognise sits inside a string of internal bookkeeping — instance
+  identifiers, a user id, an assertion number. The bundle identifier in there is
+  the useful part; the rest is not ours to put on screen.
+- **The question is "which app", not "which assertion".** An app holding both
+  the display and the system awake is one answer, not two. Grouped by app, a few
+  apps holding two kinds each stay a short list instead of reading as though it
+  were repeating itself.
+
 This is reporting, not enforcement. An assertion belongs to the process holding
 it; taking it away is not this app's business.
 

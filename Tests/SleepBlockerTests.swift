@@ -120,37 +120,75 @@ final class SleepBlockerTests: XCTestCase {
         XCTAssertEqual(blocker?.displayDetail, "caffeinate command-line tool")
     }
 
-    // MARK: - One row per thing holding the Mac awake
+    // MARK: - One row per app, because that is the question being asked
 
-    /// A process can hold several assertions of the same kind with the same
-    /// description — two `caffeinate -d` runs produce exactly that. Listing
-    /// them separately tells the user nothing they did not already know, and
-    /// leaves the list with rows that cannot be told apart.
-    func testTheSameHolderTwiceOverIsOneEntry() {
+    /// The question this answers is "which app is keeping my Mac awake". An app
+    /// that holds both kinds is one answer, not two: listing it twice answers
+    /// the same question twice, and at three apps holding two kinds each the
+    /// list reads as though it were repeating itself.
+    func testAnAppHoldingBothKindsIsOneEntry() {
+        let summary = SleepBlocker.summarised(PmsetOutput.parseAssertions(realOutput))
+
+        XCTAssertEqual(summary.count, 1)
+        XCTAssertEqual(summary.first?.name, "caffeinate")
+    }
+
+    func testAnEntrySaysBothOfTheThingsItIsHolding() {
+        let summary = SleepBlocker.summarised(PmsetOutput.parseAssertions(realOutput))
+
+        XCTAssertEqual(summary.first?.headline,
+                       "Holding the display on and the system awake")
+    }
+
+    func testAnEntryHoldingOnlyTheDisplaySaysSo() {
+        let displayOnly = """
+        Listed by owning process:
+           pid 100(caffeinate): [0x1] 00:00:02 PreventUserIdleDisplaySleep named: "caffeinate command-line tool"
+        """
+
+        let summary = SleepBlocker.summarised(PmsetOutput.parseAssertions(displayOnly))
+
+        XCTAssertEqual(summary.first?.headline, "Holding the display on")
+    }
+
+    func testAnEntryHoldingOnlyTheSystemSaysSo() {
+        let systemOnly = """
+        Listed by owning process:
+           pid 100(caffeinate): [0x1] 00:00:02 PreventUserIdleSystemSleep named: "caffeinate command-line tool"
+        """
+
+        let summary = SleepBlocker.summarised(PmsetOutput.parseAssertions(systemOnly))
+
+        XCTAssertEqual(summary.first?.headline, "Holding the system awake")
+    }
+
+    /// Two runs of the same tool are one answer, not two.
+    func testTheSameHolderTwiceOverIsStillOneEntry() {
         let twice = """
         Listed by owning process:
            pid 100(caffeinate): [0x1] 00:00:02 PreventUserIdleSystemSleep named: "caffeinate command-line tool"
            pid 200(caffeinate): [0x2] 00:01:02 PreventUserIdleSystemSleep named: "caffeinate command-line tool"
         """
 
-        let summarised = SleepBlocker.summarised(PmsetOutput.parseAssertions(twice))
-
-        XCTAssertEqual(summarised.count, 1)
+        XCTAssertEqual(SleepBlocker.summarised(PmsetOutput.parseAssertions(twice)).count, 1)
     }
 
-    /// Holding the display on and holding the system awake are different
-    /// answers to "why is my Mac like this", even from the same process.
-    func testTheSameHolderKeepingTwoDifferentThingsAwakeStaysTwoEntries() {
-        let summarised = SleepBlocker.summarised(PmsetOutput.parseAssertions(realOutput))
+    func testDifferentAppsStayApart() {
+        let two = """
+        Listed by owning process:
+           pid 100(caffeinate): [0x1] 00:00:02 PreventUserIdleSystemSleep named: "caffeinate command-line tool"
+           pid 502(runningboardd): [0x2] 00:04:11 PreventUserIdleDisplaySleep named: "app<application.com.apple.Safari.1.2(501)>:Shared Background Assertion for com.apple.Safari(FinishTask)"
+        """
 
-        XCTAssertEqual(summarised.count, 2)
-        XCTAssertEqual(summarised.filter(\.keepsDisplayOn).count, 1)
+        let summary = SleepBlocker.summarised(PmsetOutput.parseAssertions(two))
+
+        XCTAssertEqual(summary.map(\.name).sorted(), ["Safari", "caffeinate"])
     }
 
-    func testWhatIsKeptIsTheFirstOfEachKind() {
-        let summarised = SleepBlocker.summarised(PmsetOutput.parseAssertions(realOutput))
+    func testTheDescriptionSurvivesGrouping() {
+        let summary = SleepBlocker.summarised(PmsetOutput.parseAssertions(realOutput))
 
-        XCTAssertTrue(summarised.allSatisfy { $0.process == "caffeinate" })
+        XCTAssertEqual(summary.first?.detail, "caffeinate command-line tool")
     }
 
     func testAnOverlongDescriptionIsCutRatherThanWrappedAcrossTheWindow() {

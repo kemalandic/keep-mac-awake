@@ -17,7 +17,7 @@ struct SettingsView: View {
     @State private var helperState: HelperInstallationState?
     @State private var busy = false
     @State private var errorMessage: String?
-    @State private var blockers: [SleepBlocker] = []
+    @State private var blockers: [SleepBlockerSummary] = []
     @State private var confirmRestore = false
 
     init(preferences: Preferences,
@@ -73,10 +73,8 @@ struct SettingsView: View {
                 Section("Keeping this Mac awake") {
                     ForEach(blockers, id: \.self) { blocker in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(blocker.displayName)
-                            Text(blocker.keepsDisplayOn
-                                 ? "Holding the display on — \(blocker.displayDetail)"
-                                 : "Holding the system awake — \(blocker.displayDetail)")
+                            Text(blocker.name)
+                            Text("\(blocker.headline) — \(blocker.detail)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

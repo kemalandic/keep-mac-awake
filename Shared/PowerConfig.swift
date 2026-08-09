@@ -77,16 +77,49 @@ struct SleepBlocker: Codable, Equatable, Hashable {
         return text.prefix(detailLimit - 1).trimmingCharacters(in: .whitespaces) + "…"
     }
 
-    /// One entry per thing holding the Mac awake.
+    /// One entry per app holding the Mac awake.
     ///
-    /// A process can hold several assertions of the same kind with the same
-    /// description — two `caffeinate -d` runs do exactly that. Listing them
-    /// separately says nothing the first row did not, and leaves rows that
-    /// cannot be told apart. What is kept separate is the *kind*: holding the
-    /// display on and holding the system awake are different answers to "why is
-    /// my Mac like this", even from the same process.
-    static func summarised(_ blockers: [SleepBlocker]) -> [SleepBlocker] {
-        var seen = Set<String>()
-        return blockers.filter { seen.insert("\($0.displayName)|\($0.assertion)").inserted }
+    /// The question this answers is "which app is keeping my Mac awake", so an
+    /// app is one answer however many assertions it happens to hold. Two runs
+    /// of the same tool, or one app holding both the display and the system,
+    /// are still one thing to tell the user about — and at a few apps holding
+    /// two kinds each, a row per assertion reads as though the list were
+    /// repeating itself.
+    static func summarised(_ blockers: [SleepBlocker]) -> [SleepBlockerSummary] {
+        var order: [String] = []
+        var grouped: [String: [SleepBlocker]] = [:]
+
+        for blocker in blockers {
+            let name = blocker.displayName
+            if grouped[name] == nil { order.append(name) }
+            grouped[name, default: []].append(blocker)
+        }
+
+        return order.map { name in
+            let held = grouped[name] ?? []
+            return SleepBlockerSummary(
+                name: name,
+                detail: held.first?.displayDetail ?? "",
+                keepsDisplayOn: held.contains(where: \.keepsDisplayOn),
+                keepsSystemAwake: held.contains { !$0.keepsDisplayOn }
+            )
+        }
+    }
+}
+
+/// One app, and everything it is holding awake.
+struct SleepBlockerSummary: Equatable, Hashable {
+    let name: String
+    let detail: String
+    let keepsDisplayOn: Bool
+    let keepsSystemAwake: Bool
+
+    /// What this app is doing, in the user's terms.
+    var headline: String {
+        switch (keepsDisplayOn, keepsSystemAwake) {
+        case (true, true): return "Holding the display on and the system awake"
+        case (true, false): return "Holding the display on"
+        default: return "Holding the system awake"
+        }
     }
 }
