@@ -1,6 +1,8 @@
 # Architecture
 
-Small app, one unusual decision, a handful of macOS traps worth knowing about.
+Small app, two decisions that shape everything, and a pile of macOS behaviour
+worth knowing about. Most of what follows was learned by watching this code fail
+on a real machine rather than by reading documentation.
 
 ## The one decision that shapes everything
 
@@ -53,10 +55,13 @@ Keep Mac Awake.app
 
 | Unit | Responsibility |
 |---|---|
-| `MenuController` | The menu. Checkmarks reflect what the *system* reports. |
-| `PowerHelperClient` | XPC to the helper, registration and approval flow. |
-| `AppDelegate` | Wiring, errors, replacing a stale helper after an update. |
+| `MenuController` | The menu. Checkmarks reflect what the *system* reports, or say so when it cannot be read. |
+| `PowerHelperClient` | XPC to the helper, registration and approval flow. Every probe is time-boxed. |
+| `AppDelegate` | Wiring, errors, replacing a stale helper after an update, repairing a broken registration. |
 | `Preferences` | "Launch at login" only. Power settings are never mirrored here. |
+| `Deadline` | A ceiling on any wait for the helper. |
+| `HelperRegistration` | Retries a registration launchd is not ready to accept yet. |
+| `HelperReregistration` | Replaces a registration: stop the daemon, confirm the record is gone, register. |
 | `HelperService` | Applies settings, owns the baseline, re-asserts the rule. Runs as root. |
 | `PmsetControl` | Runs `/usr/bin/pmset`, parses `pmset -g`. |
 | `BaselineStore` | Where the machine came from. Root-only plist. |
@@ -87,9 +92,10 @@ unplugging the charger.
 daemon is registered with `SMAppService`; macOS asks the user to approve it once
 in System Settings › Login Items, and never again.
 
-The helper is deliberately small: write the setting, remember the machine's
-original values, answer three XPC methods. Root-privileged code should be
-boring.
+The helper is deliberately small: write the setting, hold it, remember the
+machine's original values, and answer six XPC methods — apply, read, version,
+restore defaults, list what is holding the Mac awake, and exit on request.
+Root-privileged code should be boring.
 
 Only a binary signed by the same team and carrying the app's bundle identifier
 may connect — enforced with `setCodeSigningRequirement` on the listener side.
@@ -195,10 +201,35 @@ behind, and the Settings window read it straight, telling the user the helper
 was not installed while it was working perfectly.
 
 Neither signal is trustworthy alone, so `HelperInstallationState.resolve`
-combines them. Answering plus no record is its own state — `orphaned`: it works
-now, it will not survive a reboot, and the app cannot heal it by itself, because
-registration only ever happens for a helper that is *not* answering. Settings
-offers Repair for exactly that.
+combines them, and the two broken shapes get names of their own:
+
+- **`orphaned`** — answering, no record. It works now, it will not survive a
+  reboot, and the app cannot heal it by itself, because registration only ever
+  happens for a helper that is *not* answering. Settings offers Repair.
+- **`broken`** — registered, not answering. The job exists and cannot start. The
+  app repairs this one at launch without being asked: the user already approved
+  this helper, and a registration that cannot start is not a decision to put to
+  them.
+
+A machine with no registration at all is left alone. Installing a privileged
+helper on a machine that never agreed to one is not something to do quietly.
+
+**An XPC call to a daemon launchd cannot start never comes back.** No reply and
+no error: the message waits in the queue while launchd keeps deferring the
+spawn. An unbounded probe therefore hangs the app on launch — running, visible
+in the menu bar, doing nothing and logging nothing, which reads to a user as
+"this app is broken". Every wait for the helper goes through `Deadline`.
+
+`Deadline` deliberately does not use a task group. A group waits for every child
+before it closes, even after `cancelAll()`, and the work being guarded is
+exactly the kind that cannot be cancelled: a continuation waiting on a reply
+that never arrives is not resumed by cancellation, so it never finishes and the
+group never returns. The deadline would be defeated by the thing it exists to
+defend against. The loser is abandoned instead.
+
+This one is worth remembering as a testing lesson too. The first version passed
+its tests because they stood in for slow work with `Task.sleep`, which *is*
+cancellable — the test measured an assumption rather than the behaviour.
 
 **Registration is not reliably immediate.** `register()` fails with "Operation
 not permitted" for a few seconds after the same service was unregistered, while
@@ -243,10 +274,23 @@ Dragging from the DMG in Finder does not.
 
 ## Testing
 
-Unit tests cover the parser, the baseline contract, "nothing is reverted without
-an explicit off", the retry path and the failure paths.
+Unit tests cover the parsers, the baseline contract, "nothing is reverted
+without an explicit off", the enforcement rule and its scope, the registration
+and repair paths, the deadline, and the failure paths.
 
-Device tests (separate scheme) read the real machine: they parse live `pmset -g`
-output and compare against the same values extracted independently with `awk`,
-whose case-sensitive matching cannot repeat the parser's mistake. Two
-independent readings agreeing is worth more than any fixture.
+Device tests (separate scheme) read the real machine, and each one compares two
+independent readings rather than trusting a fixture:
+
+- Live `pmset -g` parsed by this code, against the same values extracted with
+  `awk`, whose case-sensitive matching cannot repeat the parser's mistake.
+- Live `pmset -g assertions` while a real `caffeinate -d` is held, against
+  `grep` counting the same lines.
+
+Fixtures are verbatim captures of real output, because the traps in this file
+are all things the real output does and a plausible-looking fixture does not.
+
+Two of the bugs fixed here got through their first tests, and both times for the
+same reason: the fake behaved the way the author assumed the real thing did.
+`Task.sleep` stood in for uncancellable work, and a fake `pmset` reset
+everything where the real one leaves the system-wide lid override alone. When a
+test passes and the real machine disagrees, the fake is the thing to fix.

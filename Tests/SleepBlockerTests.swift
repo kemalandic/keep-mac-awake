@@ -76,4 +76,93 @@ final class SleepBlockerTests: XCTestCase {
     func testEmptyOutputIsNotAFailure() {
         XCTAssertEqual(PmsetOutput.parseAssertions(""), [])
     }
+
+    // MARK: - Naming what the user actually recognises
+
+    /// `runningboardd` holds assertions on behalf of other apps, the way powerd
+    /// does for the system. Naming the broker tells the user nothing: the app
+    /// they recognise is buried in a string of internal bookkeeping, which also
+    /// carries identifiers worth not putting on screen.
+    ///
+    /// Shaped exactly like real output; the instance numbers are placeholders.
+    private let brokered = """
+    Listed by owning process:
+       pid 502(runningboardd): [0x0002e45900058f2a] 00:04:11 PreventUserIdleSystemSleep named: "app<application.com.apple.Safari.111111111.222222222(501)>-419-49457-76904:Shared Background Assertion 16 for com.apple.Safari(FinishTask)"
+    """
+
+    func testNamesTheAppRatherThanTheBrokerHoldingForIt() {
+        let blocker = PmsetOutput.parseAssertions(brokered).first
+
+        XCTAssertEqual(blocker?.displayName, "Safari")
+    }
+
+    func testSaysWhichBrokerIsHoldingIt() {
+        let blocker = PmsetOutput.parseAssertions(brokered).first
+
+        XCTAssertEqual(blocker?.displayDetail, "via runningboardd")
+    }
+
+    /// The internal bookkeeping carries a user id and installation identifiers.
+    /// None of it means anything to the user, and it is not ours to display.
+    func testTheInternalBookkeepingNeverReachesTheScreen() {
+        let blocker = PmsetOutput.parseAssertions(brokered).first
+
+        XCTAssertFalse(blocker?.displayDetail.contains("501") ?? true)
+        XCTAssertFalse(blocker?.displayDetail.contains("Assertion 16") ?? true)
+    }
+
+    /// When the holder is the thing itself, its own description is the most
+    /// useful thing to show — no cleverness needed.
+    func testKeepsAPlainDescriptionAsItIs() {
+        let blocker = PmsetOutput.parseAssertions(realOutput).first { $0.keepsDisplayOn }
+
+        XCTAssertEqual(blocker?.displayName, "caffeinate")
+        XCTAssertEqual(blocker?.displayDetail, "caffeinate command-line tool")
+    }
+
+    // MARK: - One row per thing holding the Mac awake
+
+    /// A process can hold several assertions of the same kind with the same
+    /// description — two `caffeinate -d` runs produce exactly that. Listing
+    /// them separately tells the user nothing they did not already know, and
+    /// leaves the list with rows that cannot be told apart.
+    func testTheSameHolderTwiceOverIsOneEntry() {
+        let twice = """
+        Listed by owning process:
+           pid 100(caffeinate): [0x1] 00:00:02 PreventUserIdleSystemSleep named: "caffeinate command-line tool"
+           pid 200(caffeinate): [0x2] 00:01:02 PreventUserIdleSystemSleep named: "caffeinate command-line tool"
+        """
+
+        let summarised = SleepBlocker.summarised(PmsetOutput.parseAssertions(twice))
+
+        XCTAssertEqual(summarised.count, 1)
+    }
+
+    /// Holding the display on and holding the system awake are different
+    /// answers to "why is my Mac like this", even from the same process.
+    func testTheSameHolderKeepingTwoDifferentThingsAwakeStaysTwoEntries() {
+        let summarised = SleepBlocker.summarised(PmsetOutput.parseAssertions(realOutput))
+
+        XCTAssertEqual(summarised.count, 2)
+        XCTAssertEqual(summarised.filter(\.keepsDisplayOn).count, 1)
+    }
+
+    func testWhatIsKeptIsTheFirstOfEachKind() {
+        let summarised = SleepBlocker.summarised(PmsetOutput.parseAssertions(realOutput))
+
+        XCTAssertTrue(summarised.allSatisfy { $0.process == "caffeinate" })
+    }
+
+    func testAnOverlongDescriptionIsCutRatherThanWrappedAcrossTheWindow() {
+        let long = String(repeating: "verbose ", count: 40)
+        let output = """
+        Listed by owning process:
+           pid 900(something): [0x1] 00:00:01 PreventUserIdleSystemSleep named: "\(long)"
+        """
+
+        let detail = PmsetOutput.parseAssertions(output).first?.displayDetail ?? ""
+
+        XCTAssertLessThanOrEqual(detail.count, 80)
+        XCTAssertTrue(detail.hasSuffix("…"))
+    }
 }

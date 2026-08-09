@@ -4,8 +4,8 @@
 
 # Keep Mac Awake
 
-**A menu-bar app that stops your Mac from falling asleep — and keeps it that way
-after you quit the app.**
+**A menu-bar app that stops your Mac from falling asleep, and holds it there —
+after you quit, after a reboot, and against anything else that changes it.**
 
 [![Release](https://img.shields.io/github/v/release/kemalandic/keep-mac-awake?color=informational)](https://github.com/kemalandic/keep-mac-awake/releases/latest)
 [![macOS](https://img.shields.io/badge/macOS-14%2B-lightgrey)](#install)
@@ -61,18 +61,26 @@ The menu reads the current state from the system rather than remembering what it
 last wrote, so it stays honest. When it cannot reach the helper it says so
 instead of showing everything as off.
 
-## Why it asks for approval once
+## The helper, and the one approval
 
 Changing these settings needs root, and no entitlement lets a normal app do it.
 Keep Mac Awake ships a small privileged helper for exactly this. The first time
-you change a setting, macOS asks you to approve it in **System Settings ›
-General › Login Items**. That happens once; after that the switches work
-instantly, with no password prompts.
+you change a setting it is registered with macOS — usually silently, with just a
+notification that the app added a background item. If macOS does ask, you will
+find it under **System Settings › General › Login Items & Extensions**. Either
+way it happens once; after that the switches work instantly, with no password
+prompts.
 
 Before changing anything the helper records your machine's own values, and puts
 them back when you switch everything off.
 
-<img src="docs/assets/settings.png" width="440" alt="Settings: launch at login, and the helper's install state">
+The helper is also what holds your settings, so it keeps running whether the
+menu is open or not. If macOS ever ends up with a registration it cannot start —
+which an in-place update used to cause — the app notices at launch and repairs it
+without asking. Settings shows the helper's real state, checked by asking the
+helper itself rather than trusting macOS's record of it.
+
+<img src="docs/assets/settings.png" width="440" alt="Settings: launch at login, helper state, what is keeping the Mac awake, and Restore Defaults">
 
 Settings also has a **Launch at login** switch — that only puts the menu back
 after a restart. Your power settings are already in effect either way.
@@ -159,7 +167,7 @@ notarytool credentials saved once:
 xcrun notarytool store-credentials keep-mac-awake \
   --apple-id <id> --team-id <TEAMID> --password <app-specific-password>
 
-./scripts/release.sh 1.1.2
+./scripts/release.sh 1.2.1
 ```
 
 The script bumps the version and build number, archives universal, exports with

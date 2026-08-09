@@ -70,12 +70,12 @@ struct SettingsView: View {
 
             if !blockers.isEmpty {
                 Section("Keeping this Mac awake") {
-                    ForEach(blockers, id: \.reason) { blocker in
+                    ForEach(blockers, id: \.self) { blocker in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(blocker.process)
+                            Text(blocker.displayName)
                             Text(blocker.keepsDisplayOn
-                                 ? "Holding the display on — \(blocker.reason)"
-                                 : "Holding the system awake — \(blocker.reason)")
+                                 ? "Holding the display on — \(blocker.displayDetail)"
+                                 : "Holding the system awake — \(blocker.displayDetail)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -156,7 +156,7 @@ struct SettingsView: View {
     /// Nil means we could not ask, which is not the same as "nothing is holding
     /// the Mac awake" — keep whatever was last known rather than claiming all clear.
     private func refreshBlockers() async {
-        if let latest = await currentBlockers() { blockers = latest }
+        if let latest = await currentBlockers() { blockers = SleepBlocker.summarised(latest) }
     }
 
     private var needsAttention: Bool {
