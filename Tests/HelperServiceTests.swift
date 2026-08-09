@@ -37,7 +37,12 @@ final class HelperServiceTests: XCTestCase {
             .appendingPathComponent("kma-\(UUID().uuidString)")
             .appendingPathComponent("baseline.plist")
         store = BaselineStore(url: storeURL)
-        service = HelperService(control: control, store: store, pause: { _ in })
+        service = HelperService(
+            control: control,
+            store: store,
+            desired: DesiredStore(url: storeURL.deletingLastPathComponent()
+                .appendingPathComponent("desired.plist")),
+            pause: { _ in })
     }
 
     override func tearDown() {
@@ -94,7 +99,12 @@ final class HelperServiceTests: XCTestCase {
         let afterApply = control.settings
 
         // Simulate the app quitting and a fresh helper starting later.
-        let restarted = HelperService(control: control, store: store, pause: { _ in })
+        let restarted = HelperService(
+            control: control,
+            store: store,
+            desired: DesiredStore(url: storeURL.deletingLastPathComponent()
+                .appendingPathComponent("desired.plist")),
+            pause: { _ in })
         _ = restarted
 
         XCTAssertEqual(control.settings, afterApply, "the setting must be left alone")

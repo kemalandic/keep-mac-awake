@@ -40,19 +40,26 @@ They are independent switches. For "close the lid and keep working" you want the
 first and the third: with the lid shut the Mac can still fall asleep for being
 idle.
 
-## Your settings stay put
+## Your settings stay put — and stay yours
 
-This is a configuration tool, not a background service. Flip a switch and the
-setting is written into the system — then it stays:
+Flip a switch and the setting is written into the system. Then it is held there:
 
 - Quit the app: nothing changes
 - The app crashes: nothing changes
 - Reboot: your settings are still there
+- Another app or script changes them: they are put back
 - Only switching it off puts your machine back the way it was
 
-The app does not need to be running. Open it again when you want to change
-something. The menu reads the current state from the system, so it stays honest
-even if you change things with `pmset` yourself.
+The app does not need to be running. A small privileged helper does the holding,
+and it keeps running whether the menu is open or not.
+
+While a switch is on, that setting wins. What is *not* touched is anything you
+did not switch on — if "Keep display on" is off, your display timeout is yours,
+and nothing here will fight you over it.
+
+The menu reads the current state from the system rather than remembering what it
+last wrote, so it stays honest. When it cannot reach the helper it says so
+instead of showing everything as off.
 
 ## Why it asks for approval once
 
@@ -80,9 +87,10 @@ Keep Mac Awake writes the setting instead. Different trade-off:
 
 |  | Assertion-based apps | Keep Mac Awake |
 |---|---|---|
-| Must keep running | Yes | No |
+| The app must keep running | Yes | No |
 | Survives quit / crash / reboot | No | Yes |
 | Changes system settings | No | Yes — restored when you switch off |
+| Wins against another app changing them | n/a | Yes, while switched on |
 | Needs an admin approval | No | Once, for the helper |
 | Lid closed without an external display | Not possible | Yes |
 
@@ -156,8 +164,8 @@ See [docs/architecture.md](docs/architecture.md) — the design decision behind
 
 ```
 App/      menu bar UI, settings window, app lifecycle
-Core/     helper client, login item, preferences
-Helper/   privileged daemon: pmset control, baseline store, XPC service
+Core/     helper client, registration retry, login item, preferences
+Helper/   privileged daemon: pmset control, the two stores, enforcement, XPC
 Shared/   config type, XPC protocol and logging shared by both targets
 Tests/    XCTest — pure logic plus device-gated checks
 ```

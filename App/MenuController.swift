@@ -15,10 +15,20 @@ final class MenuController {
 
     private var config = PowerConfig.off
 
+    /// Showing "everything off" when the helper cannot be reached is the one
+    /// dishonest thing this menu could do: the settings are still written into
+    /// the system, so the user reads "off", sees the Mac stay awake, and
+    /// concludes the app is broken. Say "unknown" instead.
+    enum State: Equatable {
+        case known(PowerConfig)
+        case unknown
+    }
+
     private enum Tag: Int {
         case keepAwake = 1
         case keepDisplay
         case lidClosed
+        case unknownNotice
     }
 
     init(onToggleKeepAwake: @escaping (Bool) -> Void,
@@ -34,25 +44,48 @@ final class MenuController {
     func install() {
         buildMenu()
         statusItem.menu = menu
-        show(PowerConfig.off)
+        show(.unknown)
     }
 
-    func show(_ config: PowerConfig) {
-        self.config = config
+    func show(_ state: State) {
+        switch state {
+        case .known(let config):
+            self.config = config
+            showButton(symbol: config.keepAwake ? "cup.and.saucer.fill" : "cup.and.saucer")
+            menu.item(withTag: Tag.unknownNotice.rawValue)?.isHidden = true
 
-        if let button = statusItem.button {
-            let symbol = config.keepAwake ? "cup.and.saucer.fill" : "cup.and.saucer"
-            button.image = NSImage(systemSymbolName: symbol,
-                                   accessibilityDescription: "Keep Mac Awake")
-            button.imagePosition = .imageOnly
+            menu.item(withTag: Tag.keepAwake.rawValue)?.state = config.keepAwake ? .on : .off
+            menu.item(withTag: Tag.keepDisplay.rawValue)?.state = config.keepDisplayOn ? .on : .off
+            menu.item(withTag: Tag.lidClosed.rawValue)?.state =
+                config.stayAwakeWithLidClosed ? .on : .off
+
+        case .unknown:
+            showButton(symbol: "cup.and.saucer")
+            menu.item(withTag: Tag.unknownNotice.rawValue)?.isHidden = false
+
+            // A dash, not an empty box: whatever is written into the system is
+            // still in effect, we simply cannot read it right now.
+            for tag in [Tag.keepAwake, .keepDisplay, .lidClosed] {
+                menu.item(withTag: tag.rawValue)?.state = .mixed
+            }
         }
+    }
 
-        menu.item(withTag: Tag.keepAwake.rawValue)?.state = config.keepAwake ? .on : .off
-        menu.item(withTag: Tag.keepDisplay.rawValue)?.state = config.keepDisplayOn ? .on : .off
-        menu.item(withTag: Tag.lidClosed.rawValue)?.state = config.stayAwakeWithLidClosed ? .on : .off
+    private func showButton(symbol: String) {
+        guard let button = statusItem.button else { return }
+        button.image = NSImage(systemSymbolName: symbol,
+                               accessibilityDescription: "Keep Mac Awake")
+        button.imagePosition = .imageOnly
     }
 
     private func buildMenu() {
+        let notice = NSMenuItem(title: "Helper not responding — settings unknown",
+                                action: nil,
+                                keyEquivalent: "")
+        notice.isEnabled = false
+        notice.tag = Tag.unknownNotice.rawValue
+        menu.addItem(notice)
+
         let keepAwake = NSMenuItem(title: "Keep Awake",
                                    action: #selector(toggleKeepAwake),
                                    keyEquivalent: "k")

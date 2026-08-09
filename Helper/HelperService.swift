@@ -28,17 +28,83 @@ final class HelperService: NSObject, PowerHelperProtocol {
 
     private let control: PowerSettingsControlling
     private let store: BaselineStore
+    private let desired: DesiredStore
     private let attempts: Int
     private let pause: (TimeInterval) -> Void
 
     init(control: PowerSettingsControlling,
          store: BaselineStore,
+         desired: DesiredStore,
          attempts: Int = 3,
          pause: @escaping (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }) {
         self.control = control
         self.store = store
+        self.desired = desired
         self.attempts = attempts
         self.pause = pause
+    }
+
+    /// Records what is already in effect as the rule, for machines that come
+    /// from a version which only wrote settings and never enforced them.
+    ///
+    /// Those versions left a baseline but no rule, so the switches are on with
+    /// nothing to enforce — the user would stay unprotected until they happened
+    /// to toggle something. The baseline is the marker that this app owns the
+    /// machine's settings: where it exists and no rule does, what is in effect
+    /// *is* the rule.
+    ///
+    /// Without a baseline nothing is claimed. Values on a machine this app
+    /// never touched belong to whoever set them.
+    func adoptSettingsInEffectAsRule() {
+        guard desired.load() == nil, store.exists else { return }
+        guard let current = try? control.read() else { return }
+
+        let inEffect = PowerConfig(
+            keepAwake: current.sleepMinutes == 0,
+            keepDisplayOn: current.displaySleepMinutes == 0,
+            stayAwakeWithLidClosed: current.disableSleep
+        )
+        guard inEffect != .off else { return }
+
+        do {
+            try desired.save(inEffect)
+            Log.helper.notice("""
+            adopted the settings in effect as the rule: \
+            keepAwake=\(inEffect.keepAwake, privacy: .public) \
+            display=\(inEffect.keepDisplayOn, privacy: .public) \
+            lid=\(inEffect.stayAwakeWithLidClosed, privacy: .public)
+            """)
+        } catch {
+            Log.helper.error("could not record the adopted rule: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Puts the user's switches back in effect if anything drifted away from
+    /// them. Called on every signal that the power settings may have changed.
+    ///
+    /// Silent by design when there is nothing to do: this runs often, and a log
+    /// line per pass would bury the writes that actually matter.
+    func enforce() {
+        guard let wanted = desired.load() else { return }
+        guard let current = try? control.read() else {
+            Log.helper.error("enforce: could not read the current settings")
+            return
+        }
+        guard let correction = PowerEnforcement.correction(for: wanted, given: current) else {
+            return
+        }
+
+        Log.helper.notice("""
+        drift detected — sleep=\(current.sleepMinutes, privacy: .public) \
+        displaysleep=\(current.displaySleepMinutes, privacy: .public) \
+        disablesleep=\(current.disableSleep, privacy: .public) — reasserting
+        """)
+
+        do {
+            try writeVerified(correction)
+        } catch {
+            Log.helper.error("enforce failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     func apply(_ configData: Data, reply: @escaping (Bool, String?) -> Void) {
@@ -105,10 +171,15 @@ final class HelperService: NSObject, PowerHelperProtocol {
 
         try writeVerified(wanted)
 
-        // Fully off means we are done owning the machine's settings.
+        // Written only after the settings actually took: a rule we failed to
+        // apply is not a rule worth enforcing on every later pass.
         if config == .off {
+            // Fully off means we are done owning the machine's settings.
             store.clear()
-            Log.helper.notice("everything off — baseline released")
+            desired.clear()
+            Log.helper.notice("everything off — baseline and rule released")
+        } else {
+            try desired.save(config)
         }
     }
 

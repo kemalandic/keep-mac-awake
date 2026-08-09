@@ -15,5 +15,13 @@
   <array>
     <string>ai.pakslab.keep-mac-awake</string>
   </array>
+  <!-- The helper enforces the user's switches against anything else that writes
+       the power settings, so it has to be running rather than started on demand.
+       On demand would mean the rule lapses at every reboot until the app is
+       opened — and the app is not required to run. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
 </dict>
 </plist>

@@ -13,7 +13,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard !terminateIfAlreadyRunning() else { return }
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        Log.app.notice("app launched — version \(version, privacy: .public)")
+        guard !terminateIfAlreadyRunning() else {
+            Log.app.notice("another copy is already running — quitting")
+            return
+        }
 
         menuController = MenuController(
             onToggleKeepAwake: { [weak self] on in
@@ -48,23 +53,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Reading the machine
 
-    /// Ask the system what it currently has. Without a helper we cannot read
-    /// the settings, so the menu shows everything off until one is installed.
+    /// Ask the system what it currently has.
+    ///
+    /// Without a helper we cannot read the settings — but they are still in
+    /// effect, so the menu says "unknown" rather than "off". Showing off here
+    /// is what makes a user turn everything off, watch nothing change, and
+    /// conclude the app does not work.
     private func refreshFromSystem() {
         Task { @MainActor in
+            await repairBrokenHelper()
             await replaceStaleHelper()
 
             guard await helper.isReachable(), let current = await helper.currentConfig() else {
-                Log.app.notice("helper unreachable — showing defaults")
+                Log.app.notice("helper unreachable — settings unknown")
+                menuController.show(.unknown)
                 return
             }
             config = current
-            menuController.show(current)
+            menuController.show(.known(current))
             Log.app.notice("""
             system reports keepAwake=\(current.keepAwake, privacy: .public) \
             display=\(current.keepDisplayOn, privacy: .public) \
             lid=\(current.stayAwakeWithLidClosed, privacy: .public)
             """)
+        }
+    }
+
+    /// Fixes a registration that exists but cannot start, without waiting to be
+    /// asked. The usual cause is an ordinary update: replacing the app bundle
+    /// invalidates the bookmark the registration holds, so launchd can no
+    /// longer find the daemon's binary and the job fails on every attempt.
+    ///
+    /// Only done when a registration is actually there. A machine with no
+    /// registration at all has not agreed to anything yet, and installing a
+    /// privileged helper is not something to do behind the user's back.
+    private func repairBrokenHelper() async {
+        let state = await helper.installationState()
+        Log.app.notice("helper state at launch: \(String(describing: state), privacy: .public)")
+        guard state == .broken else { return }
+
+        Log.app.notice("helper registered but not starting — repairing")
+        do {
+            try await helper.reregister()
+            Log.app.notice("helper repaired")
+        } catch {
+            Log.app.error("repair failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -83,7 +116,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try await helper.reregister()
             Log.app.notice("helper restarted")
         } catch {
+            // Not silent: a failure here can leave the machine with no
+            // registered helper, and the user is the only one who can tell
+            // whether that matters right now.
             Log.app.error("could not restart helper: \(error.localizedDescription, privacy: .public)")
+            presentError("""
+            Keep Mac Awake could not restart its helper after the update: \
+            \(error.localizedDescription)
+
+            Open Settings and use Repair to try again.
+            """)
         }
     }
 
@@ -110,11 +152,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 try await helper.apply(wanted)
                 config = wanted
-                menuController.show(wanted)
+                menuController.show(.known(wanted))
             } catch {
                 presentError(error.localizedDescription)
                 refreshFromSystem()
             }
+        }
+    }
+
+    // MARK: - Installing
+
+    /// Installs the helper, or repairs a registration that went missing while
+    /// the daemon kept running.
+    ///
+    /// Deliberately not `prepareHelper()`: that returns early as soon as the
+    /// helper answers, and a helper that answers without being registered is
+    /// precisely the case this has to fix.
+    @MainActor
+    private func registerHelper() async {
+        do {
+            try await helper.reregister()
+            Log.app.notice("helper registered on request")
+            refreshFromSystem()
+        } catch {
+            Log.app.error("registration failed: \(error.localizedDescription, privacy: .public)")
+            presentError(error.localizedDescription)
         }
     }
 
@@ -168,23 +230,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let view = SettingsView(
             preferences: preferences,
-            currentHelperState: { [helper] in helper.installationState },
-            onInstallHelper: { [weak self] in
-                guard let self else { return }
-                self.apply(self.config)
-            },
+            currentHelperState: { [helper] in await helper.installationState() },
+            onInstallHelper: { [weak self] in await self?.registerHelper() },
             onRemoveHelper: { [weak self] in
                 guard let self else { return }
-                Task { @MainActor in
-                    // Put the machine back before removing the only thing that
-                    // can put it back.
-                    if self.config != .off {
-                        try? await self.helper.apply(.off)
-                        self.config = .off
-                        self.menuController.show(.off)
-                    }
-                    try? await self.helper.uninstall()
+                // Put the machine back before removing the only thing that
+                // can put it back.
+                if self.config != .off {
+                    try? await self.helper.apply(.off)
+                    self.config = .off
+                    self.menuController.show(.known(.off))
                 }
+                try? await self.helper.uninstall()
             }
         )
         let controller = SettingsWindowController(rootView: view)
