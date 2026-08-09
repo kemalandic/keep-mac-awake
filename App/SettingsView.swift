@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -117,9 +118,13 @@ struct SettingsView: View {
             Text("Every power setting goes back to its macOS default, including "
                  + "ones you changed yourself outside this app. This cannot be undone.")
         }
-        .task {
-            await refreshHelperState()
-            await refreshBlockers()
+        .task { await refreshEverything() }
+        // Coming back to an already-open window is a moment where the user is
+        // looking at this again, and what is holding the Mac awake changes on
+        // its own. Cheaper and more honest than a timer that would keep running
+        // whether anyone was reading it or not.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            Task { await refreshEverything() }
         }
     }
 
@@ -143,10 +148,14 @@ struct SettingsView: View {
         Task { @MainActor in
             busy = true
             await action()
-            await refreshHelperState()
-            await refreshBlockers()
+            await refreshEverything()
             busy = false
         }
+    }
+
+    private func refreshEverything() async {
+        await refreshHelperState()
+        await refreshBlockers()
     }
 
     private func refreshHelperState() async {

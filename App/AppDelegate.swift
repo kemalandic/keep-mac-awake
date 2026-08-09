@@ -222,8 +222,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings
 
+    /// Rebuilt every time it is opened.
+    ///
+    /// Keeping the window around kept its view alive too, so what it showed was
+    /// whatever was true the first time it opened — and what it shows is mostly
+    /// live state: which helper is answering, what is holding the Mac awake.
+    /// The cache bought nothing either, since presenting re-centres the window
+    /// regardless.
     private func showSettings() {
-        if let settingsWindow {
+        if let settingsWindow, settingsWindow.window?.isVisible == true {
             settingsWindow.present()
             return
         }
