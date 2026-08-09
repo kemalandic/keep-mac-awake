@@ -135,6 +135,24 @@ owns the machine's settings; without one nothing is claimed, because values on a
 machine this app never touched belong to whoever set them. An existing rule is
 never re-derived either — otherwise drift would quietly become the new rule.
 
+## What the settings cannot win against
+
+`pmset` writes settings; an `IOPMAssertion` overrides them while it is held. A
+machine can obey every setting this app writes and still refuse to sleep, with
+nothing in the settings to explain it — which reads as "this app does not work".
+
+So the helper reads `pmset -g assertions` and Settings names who is holding the
+Mac awake. Two things are filtered out, and the reasoning matters:
+
+- **`powerd`** asserts "Prevent sleep while display is on" on every Mac whose
+  screen is lit. Reporting the operating system's own bookkeeping would be noise
+  on a healthy machine and would bury the real culprit.
+- **`UserIsActive`** means someone touched the keyboard. Not a reason the
+  machine is refusing to sleep.
+
+This is reporting, not enforcement. An assertion belongs to the process holding
+it; taking it away is not this app's business.
+
 ## Baseline
 
 Before the first change the helper records the machine's own values.
@@ -143,6 +161,22 @@ Before the first change the helper records the machine's own values.
 - Switching one thing off restores that one value
 - Switching everything off restores all of them and deletes the record
 - If a write cannot be verified the record is kept, so a later attempt can retry
+
+### The trap this sets, and the way out
+
+"The machine's own values" are whatever it happened to have the first time a
+switch was flipped. If something had already set `displaysleep 0` — another
+utility, an earlier version of this app, the user's own `pmset` — then "never
+sleep" is recorded as the machine's normal. Switching everything off faithfully
+restores it and then releases the baseline: the display stays on for good, and
+there is nothing left in the app to undo it. The app is behaving correctly and
+the user is stuck.
+
+**Restore Defaults** in Settings is the way out: `pmset restoredefaults`, then
+both records released. Both, not just the baseline — a rule left behind would be
+re-asserted by the next enforcement pass and quietly undo the restore. If the
+restore itself fails the records are kept, because dropping them would strand
+the user with settings the app no longer admits to owning.
 
 ## macOS behaviour this code accounts for
 
@@ -171,6 +205,20 @@ not permitted" for a few seconds after the same service was unregistered, while
 launchd lets go of the old job. Attempting it once is how the machine ends up
 with no registration at all, so `HelperRegistration.attempt` retries and the
 failure is reported rather than logged and swallowed.
+
+**launchd will not release a registration whose job is still running.** This is
+what makes an ordinary update — replace the bundle while the old helper is
+alive — leave the old record in place, holding a bookmark to a bundle that no
+longer exists. The daemon then dies with `EX_CONFIG` on every spawn.
+
+So the helper has a `quit()` method and the app asks it to exit before touching
+the registration. Exiting reverts nothing: a setting written by the helper
+belongs to the system, not to that process.
+
+`KeepAlive` brings the daemon straight back, which is why the app does *not*
+wait for it to stay gone — that condition never becomes true and would only burn
+a timeout. A short pause covers what matters: the process being replaced has
+ended.
 
 **Replacing the app leaves the old helper running.** launchd does not restart a
 daemon because its bundle changed, so a fix shipped in the app never reaches the

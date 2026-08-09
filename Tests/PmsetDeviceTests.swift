@@ -35,6 +35,31 @@ final class PmsetDeviceTests: XCTestCase {
                       "without this line the comparison above proves nothing")
     }
 
+    /// Holds a real display-sleep assertion and checks we see it, cross-checked
+    /// against grep counting the same lines. Fixtures cannot prove the parser
+    /// still matches what this version of macOS actually prints.
+    func testAssertionReadingAgreesWithGrepOnLiveOutput() throws {
+        let caffeinate = Process()
+        caffeinate.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+        caffeinate.arguments = ["-d", "-t", "20"]
+        try caffeinate.run()
+        defer { caffeinate.terminate() }
+        Thread.sleep(forTimeInterval: 1.5)
+
+        let blockers = try PmsetControl().readAssertions()
+
+        XCTAssertTrue(blockers.contains { $0.process == "caffeinate" && $0.keepsDisplayOn },
+                      "a live caffeinate -d must show up as holding the display on")
+        XCTAssertFalse(blockers.contains { $0.process == "powerd" },
+                       "the OS's own bookkeeping must stay out of the report")
+
+        let grepped = try Self.shell(
+            "/usr/bin/pmset -g assertions | /usr/bin/grep -c 'PreventUserIdleDisplaySleep named'"
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(blockers.filter(\.keepsDisplayOn).count, Int(grepped) ?? -1,
+                       "our display-blocker count disagrees with grep")
+    }
+
     private static func awkValue(_ condition: String) throws -> Int? {
         let script = "\(condition) { print $2; exit }"
         let output = try shell("/usr/bin/pmset -g | /usr/bin/awk '\(script)'")

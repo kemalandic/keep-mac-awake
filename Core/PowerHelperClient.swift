@@ -122,7 +122,9 @@ final class PowerHelperClient {
         dropConnection()
 
         do {
-            try await HelperReregistration.run(on: service, pause: Self.backOff)
+            try await HelperReregistration.run(on: service,
+                                               stopRunning: stopRunningHelper,
+                                               pause: Self.backOff)
         } catch {
             Log.helper.error("""
             re-registration failed: \(error.localizedDescription, privacy: .public) \
@@ -142,6 +144,34 @@ final class PowerHelperClient {
     /// submitted again; the first retry is usually still too early.
     private static func backOff(_ attempt: Int) async {
         try? await Task.sleep(for: .milliseconds(500 * attempt))
+    }
+
+    /// Tells a running helper to exit, so launchd will let go of its
+    /// registration long enough for a replacement to take.
+    ///
+    /// Deliberately does not wait for the daemon to stay gone: `KeepAlive`
+    /// brings it straight back, so "wait until unreachable" would never come
+    /// true and would only burn the timeout. What matters is that the process
+    /// this app was talking to has ended — the brief pause covers that.
+    private func stopRunningHelper() async throws {
+        guard await isReachable() else { return }
+
+        Log.helper.notice("asking the running helper to exit")
+        let connection = try openConnection()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let once = Once()
+            guard let proxy = connection.remoteObjectProxyWithErrorHandler({ _ in
+                once.run { continuation.resume() }
+            }) as? PowerHelperProtocol else {
+                once.run { continuation.resume() }
+                return
+            }
+            proxy.quit { _ in once.run { continuation.resume() } }
+        }
+        dropConnection()
+
+        // Longer than the helper's own delay before exiting.
+        try? await Task.sleep(for: .milliseconds(500))
     }
 
     /// Whether the helper actually answers, within a bounded wait.
@@ -209,6 +239,51 @@ final class PowerHelperClient {
             proxy.currentConfig { data in
                 let config = data.flatMap { try? PropertyListDecoder().decode(PowerConfig.self, from: $0) }
                 once.run { continuation.resume(returning: config) }
+            }
+        }
+    }
+
+    /// Hands the settings back to macOS and gives up ownership.
+    func restoreDefaults() async throws {
+        let connection = try openConnection()
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let once = Once()
+            guard let proxy = connection.remoteObjectProxyWithErrorHandler({ _ in
+                once.run { continuation.resume(throwing: PowerHelperError.connectionFailed) }
+            }) as? PowerHelperProtocol else {
+                once.run { continuation.resume(throwing: PowerHelperError.connectionFailed) }
+                return
+            }
+
+            proxy.restoreDefaults { ok, message in
+                once.run {
+                    if ok {
+                        continuation.resume()
+                    } else {
+                        continuation.resume(throwing: PowerHelperError.helperReported(
+                            message ?? "The helper could not restore the defaults."))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Anything holding the Mac awake that is not a power setting. Empty is a
+    /// real answer; nil means we could not find out.
+    func sleepBlockers() async -> [SleepBlocker]? {
+        guard let connection = try? openConnection() else { return nil }
+        return await withCheckedContinuation { (continuation: CheckedContinuation<[SleepBlocker]?, Never>) in
+            let once = Once()
+            guard let proxy = connection.remoteObjectProxyWithErrorHandler({ _ in
+                once.run { continuation.resume(returning: nil) }
+            }) as? PowerHelperProtocol else {
+                once.run { continuation.resume(returning: nil) }
+                return
+            }
+            proxy.sleepBlockers { data in
+                let blockers = data.flatMap { try? PropertyListDecoder().decode([SleepBlocker].self, from: $0) }
+                once.run { continuation.resume(returning: blockers) }
             }
         }
     }

@@ -5,6 +5,9 @@ final class FakePowerControl: PowerSettingsControlling {
     var writes: [PowerSettings] = []
     var readError: Error?
     var writeError: Error?
+    var restoreDefaultsError: Error?
+    private(set) var restoreDefaultsCalls = 0
+    var assertions: [SleepBlocker] = []
     /// Writes that report success but leave the machine unchanged.
     var writesThatDoNotStick = 0
 
@@ -22,6 +25,14 @@ final class FakePowerControl: PowerSettingsControlling {
         }
         settings = newSettings
     }
+
+    func restoreDefaults() throws {
+        restoreDefaultsCalls += 1
+        if let restoreDefaultsError { throw restoreDefaultsError }
+        settings = PowerSettings(sleepMinutes: 10, displaySleepMinutes: 10, disableSleep: false)
+    }
+
+    func readAssertions() throws -> [SleepBlocker] { assertions }
 }
 
 final class HelperServiceTests: XCTestCase {

@@ -5,6 +5,8 @@ struct SettingsView: View {
     private let currentHelperState: () async -> HelperInstallationState
     private let onInstallHelper: () async -> Void
     private let onRemoveHelper: () async -> Void
+    private let onRestoreDefaults: () async -> Void
+    private let currentBlockers: () async -> [SleepBlocker]?
 
     @State private var launchAtLogin: Bool
     /// Nil until the first reading comes back. The helper state cannot be read
@@ -14,15 +16,21 @@ struct SettingsView: View {
     @State private var helperState: HelperInstallationState?
     @State private var busy = false
     @State private var errorMessage: String?
+    @State private var blockers: [SleepBlocker] = []
+    @State private var confirmRestore = false
 
     init(preferences: Preferences,
          currentHelperState: @escaping () async -> HelperInstallationState,
+         currentBlockers: @escaping () async -> [SleepBlocker]?,
          onInstallHelper: @escaping () async -> Void,
-         onRemoveHelper: @escaping () async -> Void) {
+         onRemoveHelper: @escaping () async -> Void,
+         onRestoreDefaults: @escaping () async -> Void) {
         self.preferences = preferences
         self.currentHelperState = currentHelperState
+        self.currentBlockers = currentBlockers
         self.onInstallHelper = onInstallHelper
         self.onRemoveHelper = onRemoveHelper
+        self.onRestoreDefaults = onRestoreDefaults
         _launchAtLogin = State(initialValue: LoginItem.isEnabled)
     }
 
@@ -60,6 +68,38 @@ struct SettingsView: View {
                     .foregroundStyle(needsAttention ? .orange : .secondary)
             }
 
+            if !blockers.isEmpty {
+                Section("Keeping this Mac awake") {
+                    ForEach(blockers, id: \.reason) { blocker in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(blocker.process)
+                            Text(blocker.keepsDisplayOn
+                                 ? "Holding the display on — \(blocker.reason)"
+                                 : "Holding the system awake — \(blocker.reason)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("These override the power settings while they last. If "
+                         + "your Mac stays awake with every switch off, this is why.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Power settings") {
+                HStack {
+                    Text("Hand the settings back to macOS")
+                    Spacer()
+                    Button("Restore Defaults…") { confirmRestore = true }
+                }
+                Text("Puts every power setting back to its macOS default and "
+                     + "releases this app's records. Use it if switching "
+                     + "everything off did not give you your Mac back.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if let errorMessage {
                 Text(errorMessage)
                     .font(.callout)
@@ -69,7 +109,18 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
-        .task { await refreshHelperState() }
+        .confirmationDialog("Restore macOS power defaults?",
+                            isPresented: $confirmRestore) {
+            Button("Restore Defaults", role: .destructive) { run(onRestoreDefaults) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Every power setting goes back to its macOS default, including "
+                 + "ones you changed yourself outside this app. This cannot be undone.")
+        }
+        .task {
+            await refreshHelperState()
+            await refreshBlockers()
+        }
     }
 
     @ViewBuilder
@@ -93,12 +144,19 @@ struct SettingsView: View {
             busy = true
             await action()
             await refreshHelperState()
+            await refreshBlockers()
             busy = false
         }
     }
 
     private func refreshHelperState() async {
         helperState = await currentHelperState()
+    }
+
+    /// Nil means we could not ask, which is not the same as "nothing is holding
+    /// the Mac awake" — keep whatever was last known rather than claiming all clear.
+    private func refreshBlockers() async {
+        if let latest = await currentBlockers() { blockers = latest }
     }
 
     private var needsAttention: Bool {

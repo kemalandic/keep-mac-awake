@@ -97,6 +97,29 @@ Keep Mac Awake writes the setting instead. Different trade-off:
 Pick this one if you want to set it and forget it, or need the lid-closed case.
 Pick one of those if you want something that never touches your system state.
 
+## When something else is keeping your Mac awake
+
+Power settings are not the only thing that stops a Mac sleeping. Any app can
+hold an assertion — video calls, media players, other keep-awake utilities — and
+that overrides the settings for as long as it lasts. Your Mac then stays awake
+with every switch here turned off, and nothing in the settings explains why.
+
+Settings lists whatever is doing it, by name. It only reports; an assertion
+belongs to the app holding it.
+
+## If switching everything off did not give your Mac back
+
+Settings has **Restore Defaults**: every power setting goes back to its macOS
+default and this app releases its records.
+
+You need it in one specific case. This app remembers your machine's values the
+first time you flip a switch, so it can put them back later. If something had
+*already* set your display to never sleep before you ever used this app, then
+that is what gets remembered as normal — and switching everything off restores
+it faithfully. Restore Defaults is the way out.
+
+It also resets power settings you changed yourself outside this app.
+
 ## Known limitation
 
 Choosing **Sleep** from the Apple menu still puts the Mac to sleep. These

@@ -231,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let view = SettingsView(
             preferences: preferences,
             currentHelperState: { [helper] in await helper.installationState() },
+            currentBlockers: { [helper] in await helper.sleepBlockers() },
             onInstallHelper: { [weak self] in await self?.registerHelper() },
             onRemoveHelper: { [weak self] in
                 guard let self else { return }
@@ -242,6 +243,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.menuController.show(.known(.off))
                 }
                 try? await self.helper.uninstall()
+            },
+            onRestoreDefaults: { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.helper.restoreDefaults()
+                    Log.app.notice("macOS defaults restored")
+                    self.config = .off
+                    self.refreshFromSystem()
+                } catch {
+                    Log.app.error("restore failed: \(error.localizedDescription, privacy: .public)")
+                    self.presentError(error.localizedDescription)
+                }
             }
         )
         let controller = SettingsWindowController(rootView: view)

@@ -29,8 +29,21 @@ enum HelperReregistration {
     private static let removalPolls = 10
     private static let registerAttempts = 5
 
+    /// - Parameter stopRunning: Stops the daemon that is currently answering.
+    ///   launchd will not release a registration whose job is still running, so
+    ///   without this an ordinary update — replace the bundle while the old
+    ///   helper is alive — keeps the old record and its now-dangling bookmark.
     static func run(on service: HelperRegistering,
+                    stopRunning: () async throws -> Void = {},
                     pause: (Int) async -> Void) async throws {
+        do {
+            try await stopRunning()
+        } catch {
+            // Worth trying anyway: a register that fails leaves the machine
+            // worse off than one that succeeds against a stubborn daemon.
+            Log.helper.notice("could not stop the running helper: \(error.localizedDescription, privacy: .public)")
+        }
+
         do {
             try await service.unregister()
         } catch {

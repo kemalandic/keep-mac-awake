@@ -38,6 +38,41 @@ final class HelperReregistrationTests: XCTestCase {
 
     private struct Denied: Error {}
 
+    /// launchd will not let go of a registration whose job is still running.
+    /// Replacing the app bundle while the old daemon is alive therefore keeps
+    /// the old record — and its bookmark to a bundle that no longer exists.
+    /// Stopping the daemon first is what makes the removal land.
+    func testStopsTheRunningDaemonBeforeTouchingTheRegistration() async throws {
+        let service = FakeService()
+        service.statuses = [.enabled, .notFound]
+        var order: [String] = []
+
+        try await HelperReregistration.run(
+            on: service,
+            stopRunning: { order.append("stop") },
+            pause: { _ in }
+        )
+
+        service.unregisterCalls > 0 ? order.append("unregister") : ()
+        XCTAssertEqual(order.first, "stop", "unregistering a live job leaves the record in place")
+        XCTAssertEqual(service.unregisterCalls, 1)
+    }
+
+    /// A daemon that will not stop is not a reason to give up: the register
+    /// still has a chance, and leaving no helper at all is worse.
+    func testCarriesOnWhenTheDaemonWillNotStop() async throws {
+        let service = FakeService()
+        service.statuses = [.notFound]
+
+        try await HelperReregistration.run(
+            on: service,
+            stopRunning: { throw Denied() },
+            pause: { _ in }
+        )
+
+        XCTAssertEqual(service.statusesWhenRegistered.count, 1)
+    }
+
     func testRemovesTheOldRegistrationBeforeCreatingANewOne() async throws {
         let service = FakeService()
         service.statuses = [.enabled, .notFound]

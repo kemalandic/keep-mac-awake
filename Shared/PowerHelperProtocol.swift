@@ -31,4 +31,24 @@ enum HelperConstants {
 
     /// CFBundleVersion of the running helper, for update detection.
     func helperVersion(reply: @escaping (String) -> Void)
+
+    /// Hands the power settings back to macOS and gives up ownership of them.
+    /// The way out of a baseline that recorded "never sleep" as the machine's
+    /// own value — after which switching off could not restore anything better.
+    func restoreDefaults(reply: @escaping (Bool, String?) -> Void)
+
+    /// Who, other than the settings, is holding the Mac awake. An IOPMAssertion
+    /// overrides every setting this app writes, so without this the menu can be
+    /// entirely correct while the machine still refuses to sleep.
+    func sleepBlockers(reply: @escaping (Data?) -> Void)
+
+    /// Asks the helper to exit.
+    ///
+    /// Needed before replacing a registration: launchd will not release a
+    /// record whose job is still running, so an ordinary update leaves the old
+    /// record — bookmarked to a bundle that no longer exists — in place.
+    ///
+    /// Exiting changes nothing about the settings. They live in the system, not
+    /// in this process, which is the whole design.
+    func quit(reply: @escaping (Bool) -> Void)
 }

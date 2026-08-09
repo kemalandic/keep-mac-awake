@@ -44,6 +44,35 @@ final class HelperService: NSObject, PowerHelperProtocol {
         self.pause = pause
     }
 
+    /// Hands the power settings back to macOS and gives up ownership.
+    ///
+    /// The escape hatch from a trap this app can set for itself. The baseline
+    /// is captured from whatever the machine happens to have the first time a
+    /// switch is flipped; if something had already set `displaysleep 0`, that
+    /// gets recorded as "the machine's own value". Switching everything off
+    /// then faithfully restores "never sleep" and releases the baseline —
+    /// leaving the display on for good, with nothing left in the app to undo.
+    ///
+    /// Both records go, not just the baseline: a rule left behind would be
+    /// re-asserted by the next enforcement pass and quietly undo the restore.
+    func restoreDefaults(reply: @escaping (Bool, String?) -> Void) {
+        Log.helper.notice("restoring macOS defaults")
+        do {
+            try control.restoreDefaults()
+        } catch {
+            // The records stay. Dropping them after a failed restore would
+            // strand the user with settings the app no longer admits to owning.
+            Log.helper.error("restore failed: \(error.localizedDescription, privacy: .public)")
+            reply(false, error.localizedDescription)
+            return
+        }
+
+        store.clear()
+        desired.clear()
+        Log.helper.notice("macOS defaults restored — baseline and rule released")
+        reply(true, nil)
+    }
+
     /// Records what is already in effect as the rule, for machines that come
     /// from a version which only wrote settings and never enforced them.
     ///
@@ -141,6 +170,26 @@ final class HelperService: NSObject, PowerHelperProtocol {
             stayAwakeWithLidClosed: settings.disableSleep
         )
         reply(try? PropertyListEncoder().encode(config))
+    }
+
+    func sleepBlockers(reply: @escaping (Data?) -> Void) {
+        guard let blockers = try? control.readAssertions() else {
+            reply(nil)
+            return
+        }
+        reply(try? PropertyListEncoder().encode(blockers))
+    }
+
+    /// Exits, so a registration replacing this one can actually take.
+    ///
+    /// The reply goes out first and the exit happens a moment later: killing
+    /// the process inside the call would drop the reply and look to the app
+    /// like a crash. Nothing is reverted on the way out — a setting written
+    /// here belongs to the system, not to this process.
+    func quit(reply: @escaping (Bool) -> Void) {
+        Log.helper.notice("asked to exit — making way for a new registration")
+        reply(true)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { exit(0) }
     }
 
     func helperVersion(reply: @escaping (String) -> Void) {
